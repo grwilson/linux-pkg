@@ -1086,11 +1086,19 @@ function get_kernel_version_for_platform_from_apt() {
 	# available, it is not always the case.
 	#
 
-	if [[ "$platform" == generic ]] &&
-		[[ "$UBUNTU_DISTRIBUTION" == bionic ]]; then
-		package=linux-image-generic-hwe-18.04
+	if [[ "$platform" == generic ]]; then
+		if [[ "$UBUNTU_DISTRIBUTION" == bionic ]]; then
+			package=linux-image-generic-hwe-18.04
+		else
+			package="linux-image-${platform}"
+		fi
+
 	else
-		package="linux-image-${platform}"
+		if [[ "$UBUNTU_DISTRIBUTION" == bionic ]]; then
+			package="linux-image-${platform}"
+		else
+			package="linux-image-${platform}-lts-20.04"
+		fi
 	fi
 
 	if [[ "$(apt-cache show --no-all-versions "$package" \
