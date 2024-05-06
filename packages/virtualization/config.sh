@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Copyright 2021 Delphix
 #
@@ -17,33 +17,16 @@
 # shellcheck disable=SC2034
 
 DEFAULT_PACKAGE_GIT_URL="https://gitlab.delphix.com/app/dlpx-app-gate.git"
-PACKAGE_DEPENDENCIES="adoptopenjdk crypt-blowfish misc-debs"
+PACKAGE_DEPENDENCIES="adoptopenjdk crypt-blowfish host-jdks"
 
 function prepare() {
-	logmust install_pkgs \
-		ant \
-		gcc \
-		libcairo2 \
-		libcurl4-openssl-dev \
-		libjbig0 \
-		libnss3-dev \
-		libnss3-dbg \
-		libnss3-tools \
-		libpam0g-dev \
-		libpixman-1-0 \
-		libssl-dev \
-		libtiff5 \
-		libxcb-render0 \
-		libxcb-shm0 \
-		python-jira \
-		python-requests \
-		rsync \
-		virtualenv
+	logmust read_list "$WORKDIR/repo/appliance/packaging/build-dependencies"
+	logmust install_pkgs "${_RET_LIST[@]}"
 
 	logmust install_pkgs \
 		"$DEPDIR"/adoptopenjdk/*.deb \
 		"$DEPDIR"/crypt-blowfish/*.deb \
-		"$DEPDIR"/misc-debs/unzip_6.0-21ubuntu1_amd64.deb
+		"$DEPDIR"/host-jdks/*.deb
 }
 
 function build() {
@@ -76,7 +59,7 @@ function build() {
 	if [[ -n "$DELPHIX_RELEASE_VERSION" ]]; then
 		logmust ant -Ddockerize=true -DbuildJni=true \
 			-DhotfixGenDlpxVersion="$DELPHIX_RELEASE_VERSION" \
-			all package
+			-Dbuild.legacy.resources.war=true all package
 	else
 		logmust ant -Ddockerize=true -DbuildJni=true all package
 	fi
@@ -86,7 +69,7 @@ function build() {
 	#
 	logmust cd "$WORKDIR/repo/appliance"
 	logmust rsync -av packaging/build/distributions/ "$WORKDIR/artifacts/"
-	logmust cp -vr \
+	logmust rsync -av \
 		bin/out/common/com.delphix.common/uem/tars \
 		"$WORKDIR/artifacts/hostchecker2"
 	logmust cp -v \

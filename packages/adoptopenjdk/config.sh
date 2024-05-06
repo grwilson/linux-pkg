@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# Copyright 2018, 2020 Delphix
+# Copyright 2018, 2022 Delphix
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,9 +19,15 @@
 DEFAULT_PACKAGE_GIT_URL=none
 PACKAGE_DEPENDENCIES="make-jpkg"
 
-_tarfile="OpenJDK8U-jdk_x64_linux_hotspot_8u262b10.tar.gz"
-_tarfile_sha256="733755fd649fad6ae91fc083f7e5a5a0b56410fb6ac1815cff29f744b128b1b1"
-_jdk_path="/usr/lib/jvm/adoptopenjdk-java8-jdk-amd64"
+if [[ "$UPSTREAM_PRODUCT_BRANCH" == "master" ]]; then
+	_tarfile="OpenJDK8U-jdk_x64_linux_hotspot_8u345b01.tar.gz"
+	_tarfile_sha256="ed6c9db3719895584fb1fd69fc79c29240977675f26631911c5a1dbce07b7d58"
+	_jdk_path="/usr/lib/jvm/adoptopenjdk-java8-jdk-amd64"
+else
+	_tarfile="OpenJDK8U-jdk_x64_linux_hotspot_8u345b01.tar.gz"
+	_tarfile_sha256="ed6c9db3719895584fb1fd69fc79c29240977675f26631911c5a1dbce07b7d58"
+	_jdk_path="/usr/lib/jvm/adoptopenjdk-java8-jdk-amd64"
+fi
 
 function prepare() {
 	logmust install_pkgs "$DEPDIR"/make-jpkg/*.deb

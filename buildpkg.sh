@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Copyright 2018, 2021 Delphix
 #
@@ -19,6 +19,7 @@ TOP="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 source "$TOP/lib/common.sh"
 
 logmust check_running_system
+logmust run_setup_if_needed
 
 function usage() {
 	[[ $# != 0 ]] && echo "$(basename "$0"): $*"

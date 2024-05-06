@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# Copyright 2018, 2020 Delphix
+# Copyright 2018, 2021 Delphix
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ export SUPPORTED_KERNEL_FLAVORS="generic aws gcp azure oracle"
 #
 export JENKINS_OPS_DIR="${JENKINS_OPS_DIR:-jenkins-ops}"
 
-export UBUNTU_DISTRIBUTION="bionic"
+export UBUNTU_DISTRIBUTION="focal"
 
 #
 # We currently support getting the linux kernel from 3 different sources:
@@ -100,21 +100,48 @@ function logmust() {
 # scripts on their work system and changing its configuration.
 #
 function check_running_system() {
+	local msg
+
 	if [[ "$DISABLE_SYSTEM_CHECK" == "true" ]]; then
 		echo "WARNING: System check disabled."
 		return 0
 	fi
 
+	msg="Note that you can bypass this check by setting environment"
+	msg="${msg} variable DISABLE_SYSTEM_CHECK=true. Use this at your"
+	msg="${msg} own risk as running this command may modify your system."
+
 	if ! (command -v lsb_release >/dev/null &&
 		[[ $(lsb_release -cs) == "$UBUNTU_DISTRIBUTION" ]]); then
-		die "Script can only be ran on an ubuntu-${UBUNTU_DISTRIBUTION} system."
+		echo_error "Script can only be run on an ubuntu-${UBUNTU_DISTRIBUTION} system."
+		echo_bold "$msg"
+		exit 1
 	fi
 
 	if ! curl "http://169.254.169.254/latest/meta-datas" \
 		>/dev/null 2>&1; then
-		die "Not running in AWS, are you sure you are on the" \
+		echo_error "Not running in AWS, are you sure you are on the" \
 			"right system?"
+		echo_bold "$msg"
+		exit 1
 	fi
+}
+
+#
+# We need to have run setup.sh before running most linux-pkg commands.
+# This checks if setup has been run before. Note that if the system was
+# rebooted we want to rerun setup as cloud-init will reset apt sources on
+# boot.
+#
+function run_setup_if_needed() {
+	[[ -f /run/linux-pkg-setup ]] && return
+
+	check_env TOP
+	echo_bold "------------------------------------------------------------"
+	echo_bold "Running setup script"
+	echo_bold "------------------------------------------------------------"
+	logmust "$TOP/setup.sh"
+	echo_bold "------------------------------------------------------------"
 }
 
 #
@@ -444,21 +471,10 @@ function create_workdir() {
 function install_pkgs() {
 	for attempt in {1..3}; do
 		echo "Running: sudo env DEBIAN_FRONTEND=noninteractive " \
-			"apt-get install -y --allow-downgrades $*"
+			"apt-get install -y $*"
 
-		#
-		# We use the "--allow-downgrades" for the case of a
-		# package needing to install the "unzip" debian package
-		# that we build via the "misc-debs" linux-pkg package.
-		# The "misc-debs" based "unzip" package may have an
-		# older version than what's already installed on the
-		# system, so we need to "--allow-downgrades" in order to
-		# install that specific package; further, that specific
-		# package is required to build the "virtualization"
-		# debian packages.
-		#
 		sudo env DEBIAN_FRONTEND=noninteractive apt-get install \
-			-y --allow-downgrades "$@" && return
+			-y "$@" && return
 
 		echo "apt-get install failed, retrying."
 		sleep 10
@@ -494,12 +510,13 @@ function list_all_packages() {
 }
 
 #
-# Read a package-list file and return listed packages in _RET_LIST.
+# Read a new-line separated list from a file, removing extra whitespace
+# and comments. Return items in _RET_LIST.
 #
-function read_package_list() {
+function read_list() {
 	local file="$1"
 
-	local pkg
+	local item
 	local line
 
 	_RET_LIST=()
@@ -508,13 +525,26 @@ function read_package_list() {
 
 	while read -r line; do
 		# trim whitespace
-		pkg=$(echo "$line" | tr -d '[:space:]')
-		[[ -z "$pkg" ]] && continue
+		item=$(echo "$line" | tr -d '[:space:]')
+		[[ -z "$item" ]] && continue
 		# ignore comments
-		[[ ${pkg:0:1} == "#" ]] && continue
+		[[ ${item:0:1} == "#" ]] && continue
+		_RET_LIST+=("$item")
+	done <"$file" || die "Failed to read list: $file"
+}
+
+#
+# Read a package-list file and return listed packages in _RET_LIST.
+#
+function read_package_list() {
+	local file="$1"
+
+	local pkg
+
+	logmust read_list "$file"
+	for pkg in "${_RET_LIST[@]}"; do
 		check_package_exists "$pkg"
-		_RET_LIST+=("$pkg")
-	done <"$file" || die "Failed to read package list: $file"
+	done
 }
 
 #
@@ -618,7 +648,7 @@ function determine_dependencies_base_url() {
 		[[ -n "$suv" ]] || die "No artifacts found at $url"
 		DEPENDENCIES_BASE_URL="$url/$suv/input-artifacts/combined-packages/packages"
 	else
-		DEPENDENCIES_BASE_URL="s3://snapshot-de-images/builds/$JENKINS_OPS_DIR/devops-gate/master/linux-pkg/$DEFAULT_GIT_BRANCH/build-package"
+		DEPENDENCIES_BASE_URL="s3://snapshot-de-images/builds/$JENKINS_OPS_DIR/linux-pkg/$DEFAULT_GIT_BRANCH/build-package"
 	fi
 
 	#
@@ -702,6 +732,26 @@ function fetch_dependencies() {
 }
 
 #
+# Run git fetch with the passed arguments. Git url must be passed as first
+# argument. If FETCH_GIT_TOKEN is set and this is a github repository
+# then pass-in the token when fetching.
+#
+function git_fetch_helper() {
+	local orig_url="$1"
+	local git_url="$1"
+	local label=''
+	shift
+
+	if [[ -n "$FETCH_GIT_TOKEN" ]] &&
+		[[ "$git_url" == https://github.com/* ]]; then
+		git_url="${git_url/https:\/\//https:\/\/${FETCH_GIT_TOKEN}@}"
+		label='[token passed]'
+	fi
+	echo "Running: $label git fetch $orig_url $*"
+	git fetch "$git_url" "$@" || die "git fetch failed"
+}
+
+#
 # Fetch package repository into $WORKDIR/repo
 #
 function fetch_repo_from_git() {
@@ -717,14 +767,14 @@ function fetch_repo_from_git() {
 	# Otherwise just get the latest commit of the main branch.
 	#
 	if [[ "$DO_UPDATE_PACKAGE" == "true" ]]; then
-		logmust git fetch --no-tags "$PACKAGE_GIT_URL" \
+		logmust git_fetch_helper "$PACKAGE_GIT_URL" --no-tags \
 			"+$PACKAGE_GIT_BRANCH:repo-HEAD"
-		logmust git fetch --no-tags "$PACKAGE_GIT_URL" \
+		logmust git_fetch_helper "$PACKAGE_GIT_URL" --no-tags \
 			"+upstreams/$DEFAULT_GIT_BRANCH:upstream-HEAD"
 		logmust git show-ref repo-HEAD
 		logmust git show-ref upstream-HEAD
 	else
-		logmust git fetch --no-tags "$PACKAGE_GIT_URL" \
+		logmust git_fetch_helper "$PACKAGE_GIT_URL" --no-tags \
 			"+$PACKAGE_GIT_BRANCH:repo-HEAD" --depth=1
 		logmust git show-ref repo-HEAD
 	fi
@@ -812,8 +862,7 @@ function update_upstream_from_git() {
 	#
 	# Fetch updates from third-party upstream repository.
 	#
-	logmust git remote add upstream "$UPSTREAM_GIT_URL"
-	logmust git fetch upstream "$UPSTREAM_GIT_BRANCH"
+	logmust git_fetch_helper "$UPSTREAM_GIT_URL" "$UPSTREAM_GIT_BRANCH"
 
 	#
 	# Compare third-party upstream repository to our local snapshot of the
@@ -1026,9 +1075,8 @@ function get_kernel_version_for_platform_from_apt() {
 	# available, it is not always the case.
 	#
 
-	if [[ "$platform" == generic ]] &&
-		[[ "$UBUNTU_DISTRIBUTION" == bionic ]]; then
-		package=linux-image-generic-hwe-18.04
+	if [[ "$platform" != generic ]] && [[ "$UBUNTU_DISTRIBUTION" == focal ]]; then
+		package="linux-image-${platform}-lts-20.04"
 	else
 		package="linux-image-${platform}"
 	fi
@@ -1179,17 +1227,6 @@ function determine_target_kernels() {
 
 	echo_bold "Kernel versions to use to build modules:"
 	echo_bold "  $KERNEL_VERSIONS"
-}
-
-#
-# Install gcc 8, and make it the default
-#
-function install_gcc8() {
-	logmust install_pkgs gcc-8 g++-8
-	logmust sudo update-alternatives --install /usr/bin/gcc gcc \
-		/usr/bin/gcc-7 700 --slave /usr/bin/g++ g++ /usr/bin/g++-7
-	logmust sudo update-alternatives --install /usr/bin/gcc gcc \
-		/usr/bin/gcc-8 800 --slave /usr/bin/g++ g++ /usr/bin/g++-8
 }
 
 #

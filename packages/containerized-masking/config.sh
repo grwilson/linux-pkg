@@ -16,8 +16,18 @@
 #
 # shellcheck disable=SC2034
 
+#
+# This package has the same Git URL as the 'masking' package. In general we
+# probably don't want to have multiple packages with the same URL, since tools
+# like git-ab-pre-push expect that there is a 1:1 correspondence between
+# packages and URLs. However, this is OK in this case because git-ab-pre-push
+# only works with packages that are included in the appliance, which this one
+# isn't.
+#
 DEFAULT_PACKAGE_GIT_URL="https://gitlab.delphix.com/masking/dms-core-gate.git"
+
 PACKAGE_DEPENDENCIES="adoptopenjdk"
+SKIP_COPYRIGHTS_CHECK=true
 
 function prepare() {
 	logmust install_pkgs "$DEPDIR"/adoptopenjdk/*.deb
@@ -30,28 +40,11 @@ function build() {
 
 	logmust cd "$WORKDIR/repo"
 
-	#
-	# The "appliance-build-stage0" Jenkins job consumes this file,
-	# along with various other files (e.g. licensing metadata).
-	# Thus, if we don't generate it here, the Jenkins job that
-	# builds the appliance will fail.
-	#
-	# shellcheck disable=SC2016
-	logmust jq -n \
-		--arg h "$(git rev-parse HEAD)" \
-		--arg d "$(date --utc --iso-8601=seconds)" \
-		'{ "dms-core-gate" : { "git-hash" : $h, "date": $d }}' \
-		>"$WORKDIR/artifacts/metadata.json"
-
 	logmust ./gradlew --no-daemon --stacktrace \
 		-Porg.gradle.configureondemand=false \
 		-PenvironmentName=linuxappliance \
-		clean \
-		generateLicenseReport \
-		:dist:distDeb \
-		:dist:distLicenseReport
+		:tools:docker:packageMaskingKubernetes
 
-	logmust rsync -av dist/build/distributions/ "$WORKDIR/artifacts/"
-	logmust cp -v \
-		dist/build/reports/dependency-license/* "$WORKDIR/artifacts/"
+	logmust cp -v tools/docker/build/masking-kubernetes.zip \
+		"$WORKDIR/artifacts/"
 }

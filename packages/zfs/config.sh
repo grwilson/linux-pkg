@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Copyright 2019, 2020 Delphix
 #
@@ -17,9 +17,9 @@
 # shellcheck disable=SC2034
 
 DEFAULT_PACKAGE_GIT_URL="https://github.com/delphix/zfs.git"
-PACKAGE_DEPENDENCIES="@linux-kernel"
+PACKAGE_DEPENDENCIES="@linux-kernel delphix-rust"
 
-UPSTREAM_GIT_URL="https://github.com/zfsonlinux/zfs.git"
+UPSTREAM_GIT_URL="https://github.com/openzfs/zfs.git"
 UPSTREAM_GIT_BRANCH="master"
 
 function prepare() {
@@ -48,11 +48,13 @@ function prepare() {
 		lsb-release \
 		lsscsi \
 		parted \
+		pkg-config \
 		po-debconf \
 		python3 \
 		uuid-dev \
 		zlib1g-dev
 	logmust install_kernel_headers
+	logmust install_pkgs "$DEPDIR"/delphix-rust/*.deb
 }
 
 function checkstyle() {
